@@ -1,0 +1,32 @@
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Environment variables
+.env
+.env.local
+
+# Data mentah (ukuran besar)
+data/raw/
+data/processed/
+
+# Model tersimpan (ukuran besar)
+models/*.pkl
+models/*.h5
+models/*.keras
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
