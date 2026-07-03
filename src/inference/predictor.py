@@ -31,7 +31,7 @@ class WeatherPredictor:
 
     def _fetch_recent_weather(self, lat: float, lon: float, days: int = 30) -> pd.DataFrame:
         """Ambil data cuaca terbaru dari Open-Meteo untuk input LSTM."""
-        end_date   = datetime.now().strftime("%Y-%m-%d")
+        end_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
         url    = "https://archive-api.open-meteo.com/v1/archive"
@@ -59,30 +59,28 @@ class WeatherPredictor:
         df = df.drop(columns=["time"])
         return df
 
-    def _fetch_forecast_weather(self, lat: float, lon: float, days: int = 14) -> pd.DataFrame:
-        """Ambil forecast cuaca dari Open-Meteo Forecast API."""
-        url    = "https://api.open-meteo.com/v1/forecast"
-        params = {
-            "latitude"  : lat,
-            "longitude" : lon,
-            "daily"     : [
-                "temperature_2m_max",
-                "temperature_2m_min",
-                "precipitation_sum",
-                "windspeed_10m_max",
-                "weathercode",
-            ],
-            "forecast_days": days,
-            "timezone"     : "Asia/Jakarta"
-        }
 
+
+    def _fetch_forecast_weather(self, lat: float, lon: float, days: int = 14) -> pd.DataFrame:
+        url = 'https://api.open-meteo.com/v1/forecast'
+        params = {
+            'latitude': lat,
+            'longitude': lon,
+            'daily': [
+                'temperature_2m_min',
+                'precipitation_sum',
+                'windspeed_10m_max',
+                'weathercode',
+            ],
+            'timezone': 'Asia/Jakarta',
+            'forecast_days': days,
+        }
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
-
-        df = pd.DataFrame(data["daily"])
-        df["date"] = pd.to_datetime(df["time"])
-        df = df.drop(columns=["time"])
+        df = pd.DataFrame(data['daily'])
+        df['date'] = pd.to_datetime(df['time'])
+        df = df.drop(columns=['time'])
         return df
 
     def _predict_lstm(self, recent_temps: np.ndarray, n_days: int) -> List[float]:
