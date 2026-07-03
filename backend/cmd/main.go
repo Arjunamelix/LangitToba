@@ -30,7 +30,7 @@ func main() {
 	if inferenceClient.HealthCheck() {
 		log.Println("✓ Connected to FastAPI inference service")
 	} else {
-		log.Println("⚠ FastAPI inference service not reachable — pastikan sudah running")
+		log.Println(" FastAPI inference service not reachable — pastikan sudah running")
 	}
 
 	// Gin router
@@ -67,9 +67,9 @@ func main() {
 		api.GET("/climate", climateHandler.GetClimateSummary)
 	}
 
-	fmt.Printf("🌤  LangitToba Backend running on port %s\n", port)
-	fmt.Printf("📡  Inference URL: %s\n", inferenceURL)
-	fmt.Println("📌  Endpoints:")
+	fmt.Printf("  LangitToba Backend running on port %s\n", port)
+	fmt.Printf("  Inference URL: %s\n", inferenceURL)
+	fmt.Println("  Endpoints:")
 	fmt.Println("     GET /api/health")
 	fmt.Println("     GET /api/forecast?location=balige&days=7")
 	fmt.Println("     GET /api/locations")
