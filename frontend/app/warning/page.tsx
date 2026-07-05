@@ -1,235 +1,167 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertTriangle, RefreshCw, MapPin, Thermometer, Droplets, Wind, CheckCircle } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import React, { useEffect, useState } from "react";
+import LocationCombobox from "@/components/ui/LocationCombobox";
+import { useWeatherStore } from "@/store/useWeatherStore";
 import { getWarnings } from "@/lib/api";
 import { Warning } from "@/types/weather";
-import { getRiskBg, getRiskColor, getRiskLabel, getWeatherInfo } from "@/lib/weatherCode";
 
-const THRESHOLDS = [
-  { label: "Hujan Lebat",         value: "> 50 mm/hari",  level: "ORANGE", icon: Droplets },
-  { label: "Hujan Sangat Lebat",  value: "> 100 mm/hari", level: "RED",    icon: Droplets },
-  { label: "Angin Kencang",       value: "> 40 km/h",     level: "WARNING", icon: Wind },
-  { label: "Suhu Panas Ekstrem",  value: "> 35°C",        level: "WARNING", icon: Thermometer },
-  { label: "Suhu Dingin Ekstrem", value: "< 15°C",        level: "WARNING", icon: Thermometer },
-];
+const RISK_STYLE: Record<string, string> = {
+  red:     "border-red-400 bg-red-50 text-red-800 dark:bg-red-950/30 dark:text-red-300",
+  orange:  "border-orange-400 bg-orange-50 text-orange-800 dark:bg-orange-950/30 dark:text-orange-300",
+  warning: "border-yellow-400 bg-yellow-50 text-yellow-800 dark:bg-yellow-950/30 dark:text-yellow-300",
+  normal:  "border-green-300 bg-green-50 text-green-800 dark:bg-green-950/20 dark:text-green-300",
+};
 
-function WarningCard({ w }: { w: Warning }) {
-  const isNormal = w.risk_level === "normal";
-  return (
-    <Card className={`${getRiskBg(w.risk_level)} transition-all`}>
-      <CardContent className="p-5 flex flex-col gap-3">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-primary shrink-0" />
-            <p className="font-semibold text-sm">{w.location_label}</p>
-          </div>
-          <Badge
-            variant="outline"
-            className={`text-xs shrink-0 ${getRiskColor(w.risk_level)} border-current`}
-          >
-            {getRiskLabel(w.risk_level)}
-          </Badge>
-        </div>
+const RISK_BADGE: Record<string, string> = {
+  red:     "bg-red-500 text-white",
+  orange:  "bg-orange-500 text-white",
+  warning: "bg-yellow-400 text-yellow-900",
+  normal:  "bg-green-500 text-white",
+};
 
-        {/* Metrics */}
-        <div className="grid grid-cols-3 gap-2">
-          <div className="flex flex-col gap-0.5">
-            <p className="text-xs text-muted-foreground flex items-center gap-1">
-              <Thermometer className="h-3 w-3" /> Suhu Max
-            </p>
-            <p className="text-sm font-medium">{w.temp_max.toFixed(1)}°C</p>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <p className="text-xs text-muted-foreground flex items-center gap-1">
-              <Droplets className="h-3 w-3" /> Hujan
-            </p>
-            <p className="text-sm font-medium">{w.precipitation.toFixed(1)} mm</p>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <p className="text-xs text-muted-foreground flex items-center gap-1">
-              <Wind className="h-3 w-3" /> Angin
-            </p>
-            <p className="text-sm font-medium">{w.windspeed_max.toFixed(1)} km/h</p>
-          </div>
-        </div>
-
-        {/* Warnings list */}
-        {isNormal ? (
-          <div className="flex items-center gap-2 text-green-500 text-sm">
-            <CheckCircle className="h-4 w-4 shrink-0" />
-            Kondisi cuaca normal, tidak ada peringatan
-          </div>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            {w.warnings.map((msg, i) => (
-              <div key={i} className={`flex items-center gap-2 text-sm ${getRiskColor(w.risk_level)}`}>
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                {msg}
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
+const RISK_LABEL: Record<string, string> = {
+  red:     "BAHAYA",
+  orange:  "SIAGA",
+  warning: "WASPADA",
+  normal:  "NORMAL",
+};
 
 export default function WarningPage() {
+  const { selectedKey } = useWeatherStore();
   const [warnings, setWarnings] = useState<Warning[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-
-  const fetchWarnings = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getWarnings();
-      setWarnings(data);
-      setLastUpdate(new Date());
-    } catch {
-      setError("Gagal mengambil data peringatan. Pastikan backend berjalan.");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
-    fetchWarnings();
-  }, []);
+    setLoading(true);
+    setError(null);
+    getWarnings()
+      .then((data: Warning[]) => setWarnings(data))
+      .catch((err: Error) => setError(err.message ?? "Gagal memuat peringatan"))
+      .finally(() => setLoading(false));
+  }, [selectedKey]);
 
-  const activeWarnings = warnings.filter((w) => w.risk_level !== "normal");
-  const safeLocations = warnings.filter((w) => w.risk_level === "normal");
+  // Filter lokasi yang dipilih, fallback ke semua jika tidak ada match
+  const filtered = warnings.filter((w) =>
+    w.location.toLowerCase().includes(selectedKey)
+  );
+  const shown = filtered.length > 0 ? filtered : warnings;
+  const activeWarnings = shown.filter((w) => w.risk_level !== "normal");
 
   return (
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 flex flex-col gap-6">
+    <div className="container mx-auto max-w-4xl px-4 py-8">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold tracking-tight">Peringatan Dini</h1>
+        <p className="mt-1 text-muted-foreground">
+          Early warning cuaca ekstrem kawasan Danau Toba
+        </p>
+      </div>
 
-      {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-2">
-            <AlertTriangle className="h-6 w-6 text-orange-500" />
-            Early Warning
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Peringatan dini cuaca ekstrem kawasan Danau Toba
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {lastUpdate && (
-            <p className="text-xs text-muted-foreground">
-              Update: {lastUpdate.toLocaleTimeString("id-ID")}
-            </p>
-          )}
-          <Button onClick={fetchWarnings} variant="outline" disabled={loading} className="gap-2">
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
+      {/* Location Picker */}
+      <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+        <span className="text-sm font-medium text-muted-foreground">Lokasi:</span>
+        <LocationCombobox className="w-full sm:w-[320px]" />
+      </div>
+
+      {/* Thresholds */}
+      <div className="mb-6 rounded-lg border bg-muted/30 p-4">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Ambang Batas Peringatan
+        </p>
+        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+          {[
+            { label: "Hujan lebat",         value: "> 50 mm/hari",  level: "orange" },
+            { label: "Hujan sangat lebat",  value: "> 100 mm/hari", level: "red" },
+            { label: "Angin kencang",       value: "> 40 km/h",     level: "warning" },
+            { label: "Suhu panas ekstrem",  value: "> 35°C",        level: "warning" },
+            { label: "Suhu dingin ekstrem", value: "< 15°C",        level: "warning" },
+          ].map((t) => (
+            <div key={t.label} className="flex items-center gap-2">
+              <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${RISK_BADGE[t.level]}`}>
+                {RISK_LABEL[t.level]}
+              </span>
+              <span className="text-muted-foreground">{t.label} {t.value}</span>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* ── Summary badges ── */}
-      {!loading && warnings.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          <Badge variant="outline" className="gap-1.5 text-sm py-1 px-3">
-            <span className="h-2 w-2 rounded-full bg-green-500 inline-block" />
-            {safeLocations.length} Lokasi Aman
-          </Badge>
-          {activeWarnings.length > 0 && (
-            <Badge variant="outline" className="gap-1.5 text-sm py-1 px-3 border-orange-500/50 text-orange-500">
-              <AlertTriangle className="h-3 w-3" />
-              {activeWarnings.length} Lokasi Peringatan
-            </Badge>
-          )}
-        </div>
-      )}
-
-      {/* ── Error ── */}
-      {error && (
-        <Card className="border-red-500/30 bg-red-500/10">
-          <CardContent className="p-4 flex items-center gap-2 text-red-500 text-sm">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            {error}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ── Loading ── */}
+      {/* States */}
       {loading && (
-        <div className="flex items-center justify-center py-20">
-          <div className="flex flex-col items-center gap-3">
-            <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">Mengambil data peringatan...</p>
-          </div>
+        <div className="flex items-center justify-center py-16 text-muted-foreground">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent mr-2" />
+          Memuat peringatan...
         </div>
       )}
 
-      {/* ── Warning Cards ── */}
-      {!loading && warnings.length > 0 && (
-        <>
-          {activeWarnings.length > 0 && (
-            <div className="flex flex-col gap-3">
-              <h2 className="font-semibold text-orange-500 flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4" />
-                Lokasi dengan Peringatan Aktif
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {activeWarnings.map((w) => (
-                  <WarningCard key={w.location} w={w} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="flex flex-col gap-3">
-            <h2 className="font-semibold text-green-500 flex items-center gap-2">
-              <CheckCircle className="h-4 w-4" />
-              Lokasi Aman
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {safeLocations.map((w) => (
-                <WarningCard key={w.location} w={w} />
-              ))}
-            </div>
-          </div>
-        </>
+      {error && !loading && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center text-sm text-destructive">
+          {error}
+        </div>
       )}
 
-      {/* ── Threshold Info ── */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-semibold">Ambang Batas Peringatan</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {THRESHOLDS.map((t) => (
-              <div key={t.label} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-                <t.icon className="h-4 w-4 text-muted-foreground shrink-0" />
-                <div className="flex flex-col gap-0.5">
-                  <p className="text-xs font-medium">{t.label}</p>
-                  <p className="text-xs text-muted-foreground">{t.value}</p>
+      {!loading && !error && (
+        activeWarnings.length === 0 ? (
+          <div className="rounded-xl border border-green-300 bg-green-50 p-8 text-center dark:bg-green-950/20">
+            <p className="text-4xl mb-3">✅</p>
+            <p className="font-semibold text-green-800 dark:text-green-300">
+              Tidak ada peringatan aktif
+            </p>
+            <p className="mt-1 text-sm text-green-700/70 dark:text-green-400/70">
+              Kondisi cuaca dalam batas normal untuk lokasi ini.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {activeWarnings.length} lokasi dengan peringatan aktif
+            </p>
+            {activeWarnings.map((w, i) => (
+              <div
+                key={i}
+                className={`rounded-xl border-l-4 p-5 ${RISK_STYLE[w.risk_level] ?? RISK_STYLE.warning}`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`rounded px-2 py-0.5 text-xs font-bold ${RISK_BADGE[w.risk_level]}`}>
+                        {RISK_LABEL[w.risk_level]}
+                      </span>
+                      <span className="font-medium">{w.location_label}</span>
+                    </div>
+
+                    {/* Warning tags */}
+                    {w.warnings.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-3">
+                        {w.warnings.map((tag, wi) => (
+                          <span
+                            key={wi}
+                            className="rounded-full border px-2 py-0.5 text-xs"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Stats */}
+                    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                      <span>🌡️ Maks {w.temp_max?.toFixed(1) ?? "—"}°C</span>
+                      <span>💧 {w.precipitation?.toFixed(1) ?? "0"} mm</span>
+                      <span>💨 {w.windspeed_max?.toFixed(0) ?? "—"} km/h</span>
+                    </div>
+                  </div>
+
+                  <div className="text-right shrink-0 text-xs text-muted-foreground">
+                    <p>{w.lat.toFixed(3)}, {w.lon.toFixed(3)}</p>
+                  </div>
                 </div>
-                <Badge
-                  variant="outline"
-                  className={`ml-auto text-xs shrink-0 ${
-                    t.level === "RED" ? "text-red-500 border-red-500/50" :
-                    t.level === "ORANGE" ? "text-orange-500 border-orange-500/50" :
-                    "text-yellow-500 border-yellow-500/50"
-                  }`}
-                >
-                  {t.level}
-                </Badge>
               </div>
             ))}
           </div>
-        </CardContent>
-      </Card>
-
+        )
+      )}
     </div>
   );
 }

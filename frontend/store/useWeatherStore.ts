@@ -1,56 +1,58 @@
 import { create } from "zustand";
-import { ForecastResponse } from "@/types/forecast";
-import { Location, Warning, ClimateStats } from "@/types/weather";
 
-interface WeatherStore {
-  // State
-  selectedLocation: string;
-  selectedDays: number;
-  forecast: ForecastResponse | null;
-  warnings: Warning[];
-  climate: ClimateStats | null;
-  locations: Location[];
-  isLoading: boolean;
-  error: string | null;
-
-  // Actions
-  setSelectedLocation: (location: string) => void;
-  setSelectedDays: (days: number) => void;
-  setForecast: (forecast: ForecastResponse | null) => void;
-  setWarnings: (warnings: Warning[]) => void;
-  setClimate: (climate: ClimateStats | null) => void;
-  setLocations: (locations: Location[]) => void;
-  setLoading: (isLoading: boolean) => void;
-  setError: (error: string | null) => void;
-  reset: () => void;
+// ─── Types 
+export interface Location {
+  id: number;
+  key: string;
+  label: string;
+  lat: number;
+  lon: number;
+  kabupaten: string | null;
+  tahap: number;
+  is_lakeside: boolean;
+  is_active: boolean;
 }
 
-export const useWeatherStore = create<WeatherStore>((set) => ({
-  // Initial state
-  selectedLocation: "balige",
-  selectedDays: 7,
-  forecast: null,
-  warnings: [],
-  climate: null,
-  locations: [],
-  isLoading: false,
-  error: null,
+export interface WeatherStore {
+  // Locations
+  locations: Location[];
+  locationsLoading: boolean;
+  locationsError: string | null;
+  fetchLocations: () => Promise<void>;
 
-  // Actions
-  setSelectedLocation: (location) => set({ selectedLocation: location }),
-  setSelectedDays: (days) => set({ selectedDays: days }),
-  setForecast: (forecast) => set({ forecast }),
-  setWarnings: (warnings) => set({ warnings }),
-  setClimate: (climate) => set({ climate }),
-  setLocations: (locations) => set({ locations }),
-  setLoading: (isLoading) => set({ isLoading }),
-  setError: (error) => set({ error }),
-  reset: () =>
-    set({
-      forecast: null,
-      warnings: [],
-      climate: null,
-      error: null,
-      isLoading: false,
-    }),
+  // Selected location key (dipakai forecast & warning page)
+  selectedKey: string;
+  setSelectedKey: (key: string) => void;
+}
+
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:9000";
+
+export const useWeatherStore = create<WeatherStore>((set, get) => ({
+  // ─── Locations 
+  locations: [],
+  locationsLoading: false,
+  locationsError: null,
+
+  fetchLocations: async () => {
+    if (get().locations.length > 0) return; // sudah ter-load, skip
+    set({ locationsLoading: true, locationsError: null });
+    try {
+      const res = await fetch(`${API_BASE}/api/locations`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const locs: Location[] = (data.locations ?? []).filter(
+        (l: Location) => l.is_active
+      );
+      set({ locations: locs, locationsLoading: false });
+    } catch (err) {
+      set({
+        locationsError: err instanceof Error ? err.message : "Gagal memuat lokasi",
+        locationsLoading: false,
+      });
+    }
+  },
+
+
+  selectedKey: "balige",
+  setSelectedKey: (key) => set({ selectedKey: key }),
 }));
