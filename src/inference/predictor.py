@@ -9,11 +9,16 @@ import tensorflow as tf
 
 from src.utils.config import (
     LSTM_MODEL_PATH, LSTM_SCALER_PATH,
-    WINDOW_SIZE, THRESHOLDS, LOCATIONS
+    WINDOW_SIZE, THRESHOLDS, get_locations
 )
 from src.utils.logger import get_logger
 
 logger = get_logger("predictor")
+
+# Load lokasi dari DB saat modul pertama kali di-import
+# Kalau DB tidak tersedia, otomatis fallback ke hardcode
+LOCATIONS = get_locations()
+
 
 class WeatherPredictor:
     def __init__(self):
@@ -30,8 +35,8 @@ class WeatherPredictor:
         logger.info("Models loaded successfully!")
 
     def _fetch_recent_weather(self, lat: float, lon: float, days: int = 30) -> pd.DataFrame:
-        """Ambil data cuaca terbaru dari Open-Meteo untuk input LSTM."""
-        end_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
+        """Ambil data cuaca terbaru dari Open-Meteo Archive untuk input LSTM."""
+        end_date   = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
         url    = "https://archive-api.open-meteo.com/v1/archive"
@@ -47,55 +52,56 @@ class WeatherPredictor:
                 "windspeed_10m_max",
                 "weathercode",
             ],
-            "timezone": "Asia/Jakarta"
+            "timezone": "Asia/Jakarta",
         }
 
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
 
-        df = pd.DataFrame(data["daily"])
+        df         = pd.DataFrame(data["daily"])
         df["date"] = pd.to_datetime(df["time"])
-        df = df.drop(columns=["time"])
+        df         = df.drop(columns=["time"])
         return df
 
-
-
     def _fetch_forecast_weather(self, lat: float, lon: float, days: int = 14) -> pd.DataFrame:
-        url = 'https://api.open-meteo.com/v1/forecast'
+        """Ambil forecast cuaca (hujan, angin, weathercode) dari Open-Meteo Forecast API."""
+        url    = "https://api.open-meteo.com/v1/forecast"
         params = {
-            'latitude': lat,
-            'longitude': lon,
-            'daily': [
-                'temperature_2m_min',
-                'precipitation_sum',
-                'windspeed_10m_max',
-                'weathercode',
+            "latitude"     : lat,
+            "longitude"    : lon,
+            "daily"        : [
+                "temperature_2m_max",
+                "temperature_2m_min",
+                "precipitation_sum",
+                "windspeed_10m_max",
+                "weathercode",
             ],
-            'timezone': 'Asia/Jakarta',
-            'forecast_days': days,
+            "timezone"     : "Asia/Jakarta",
+            "forecast_days": days,
         }
+
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
-        df = pd.DataFrame(data['daily'])
-        df['date'] = pd.to_datetime(df['time'])
-        df = df.drop(columns=['time'])
+
+        df         = pd.DataFrame(data["daily"])
+        df["date"] = pd.to_datetime(df["time"])
+        df         = df.drop(columns=["time"])
         return df
 
     def _predict_lstm(self, recent_temps: np.ndarray, n_days: int) -> List[float]:
         """Prediksi suhu n hari ke depan menggunakan LSTM."""
-        scaled    = self.scaler.transform(recent_temps.reshape(-1, 1)).flatten()
-        sequence  = list(scaled[-WINDOW_SIZE:])
+        scaled      = self.scaler.transform(recent_temps.reshape(-1, 1)).flatten()
+        sequence    = list(scaled[-WINDOW_SIZE:])
         predictions = []
 
         for _ in range(n_days):
-            x   = np.array(sequence[-WINDOW_SIZE:]).reshape(1, WINDOW_SIZE, 1)
+            x           = np.array(sequence[-WINDOW_SIZE:]).reshape(1, WINDOW_SIZE, 1)
             pred_scaled = self.lstm_model.predict(x, verbose=0)[0][0]
             predictions.append(pred_scaled)
             sequence.append(pred_scaled)
 
-        # Inverse transform ke °C
         preds = self.scaler.inverse_transform(
             np.array(predictions).reshape(-1, 1)
         ).flatten()
@@ -122,7 +128,20 @@ class WeatherPredictor:
             warnings.append("Suhu ekstrem tinggi")
         return warnings
 
+    def reload_locations(self):
+        """
+        Reload LOCATIONS dari DB — panggil ini kalau ada lokasi baru ditambahkan
+        tanpa restart FastAPI. Endpoint: POST /api/reload-locations
+        """
+        global LOCATIONS
+        LOCATIONS = get_locations()
+        logger.info(f"LOCATIONS reloaded: {len(LOCATIONS)} lokasi")
+
     def predict(self, location: str, days: int) -> Dict:
+        if location not in LOCATIONS:
+            raise ValueError(f"Lokasi '{location}' tidak ditemukan. "
+                             f"Tersedia: {list(LOCATIONS.keys())}")
+
         loc_info = LOCATIONS[location]
         lat, lon = loc_info["lat"], loc_info["lon"]
 
@@ -135,18 +154,18 @@ class WeatherPredictor:
         # Prediksi suhu dengan LSTM
         lstm_preds = self._predict_lstm(recent_temps, days)
 
-        # Ambil forecast cuaca lain (hujan, angin) dari Open-Meteo
+        # Ambil forecast cuaca lain dari Open-Meteo
         forecast_df = self._fetch_forecast_weather(lat, lon, days)
 
         # Gabungkan hasil
         results = []
         for i in range(min(days, len(forecast_df))):
-            row          = forecast_df.iloc[i]
-            temp_max     = round(float(lstm_preds[i]), 2)
-            temp_min     = round(float(row["temperature_2m_min"]), 2)
-            precip       = round(float(row["precipitation_sum"]), 2)
-            wind         = round(float(row["windspeed_10m_max"]), 2)
-            weathercode  = int(row["weathercode"])
+            row         = forecast_df.iloc[i]
+            temp_max    = round(float(lstm_preds[i]), 2)
+            temp_min    = round(float(row["temperature_2m_min"]), 2)
+            precip      = round(float(row["precipitation_sum"]), 2)
+            wind        = round(float(row["windspeed_10m_max"]), 2)
+            weathercode = int(row["weathercode"])
 
             results.append({
                 "date"         : row["date"].strftime("%Y-%m-%d"),
