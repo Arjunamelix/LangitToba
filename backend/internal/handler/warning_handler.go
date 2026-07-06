@@ -4,48 +4,38 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"langittoba/backend/pkg/httpclient"
+	"langittoba/backend/internal/service"
 )
 
 type WarningHandler struct {
-	InferenceClient *httpclient.InferenceClient
+	warningSvc *service.WarningService
 }
 
-func NewWarningHandler(client *httpclient.InferenceClient) *WarningHandler {
-	return &WarningHandler{InferenceClient: client}
+func NewWarningHandler(warningSvc *service.WarningService) *WarningHandler {
+	return &WarningHandler{warningSvc: warningSvc}
 }
 
-// GetWarnings — cek warning dari forecast 14 hari semua lokasi
 // GET /api/warnings
 func (h *WarningHandler) GetWarnings(c *gin.Context) {
-	locations := []string{"balige", "parapat", "pangururan", "nainggolan", "tengah_danau"}
-	var activeWarnings []gin.H
-
-	for _, loc := range locations {
-		result, err := h.InferenceClient.Predict(loc, 14)
-		if err != nil {
-			continue
-		}
-
-		for _, day := range result.Forecast {
-			if len(day.Warnings) > 0 {
-				activeWarnings = append(activeWarnings, gin.H{
-					"location"      : loc,
-					"location_label": result.LocationLabel,
-					"date"          : day.Date,
-					"risk_level"    : day.RiskLevel,
-					"warnings"      : day.Warnings,
-				})
-			}
-		}
-	}
-
-	if activeWarnings == nil {
-		activeWarnings = []gin.H{}
+	warnings, err := h.warningSvc.GetWarnings()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"total_warnings": len(activeWarnings),
-		"warnings":       activeWarnings,
+		"total_warnings": len(warnings),
+		"warnings":       warnings,
 	})
+}
+
+// GET /api/warnings/:key
+func (h *WarningHandler) GetWarningByLocation(c *gin.Context) {
+	key := c.Param("key")
+	warning, err := h.warningSvc.GetWarningByLocation(key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, warning)
 }

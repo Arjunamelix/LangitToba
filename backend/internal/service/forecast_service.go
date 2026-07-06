@@ -1,11 +1,15 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"langittoba/backend/internal/model"
 	"langittoba/backend/internal/repository"
 	"langittoba/backend/pkg/httpclient"
 )
+
+// Sentinel error — dipakai forecast_handler.go
+var ErrLocationNotFound = errors.New("lokasi tidak ditemukan")
 
 type ForecastService struct {
 	locationRepo    *repository.LocationRepository
@@ -22,14 +26,13 @@ func NewForecastService(
 	}
 }
 
-// GetForecast — prediksi N hari untuk satu lokasi
 func (s *ForecastService) GetForecast(locationKey string, days int) (*model.ForecastResponse, error) {
 	if days < 1 || days > 14 {
 		return nil, fmt.Errorf("days harus antara 1-14, got %d", days)
 	}
 	_, err := s.locationRepo.GetByKey(locationKey)
 	if err != nil {
-		return nil, fmt.Errorf("lokasi '%s' tidak ditemukan", locationKey)
+		return nil, ErrLocationNotFound
 	}
 	result, err := s.inferenceClient.Predict(locationKey, days)
 	if err != nil {
@@ -38,7 +41,6 @@ func (s *ForecastService) GetForecast(locationKey string, days int) (*model.Fore
 	return result, nil
 }
 
-// GetMultiForecast — prediksi untuk beberapa lokasi sekaligus
 func (s *ForecastService) GetMultiForecast(locationKeys []string, days int) ([]*model.ForecastResponse, error) {
 	if days < 1 || days > 14 {
 		return nil, fmt.Errorf("days harus antara 1-14")
@@ -47,7 +49,7 @@ func (s *ForecastService) GetMultiForecast(locationKeys []string, days int) ([]*
 	for _, key := range locationKeys {
 		result, err := s.inferenceClient.Predict(key, days)
 		if err != nil {
-			continue // skip lokasi yang gagal
+			continue
 		}
 		results = append(results, result)
 	}

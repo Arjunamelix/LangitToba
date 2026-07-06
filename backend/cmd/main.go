@@ -14,57 +14,52 @@ import (
 	"langittoba/backend/internal/handler"
 	"langittoba/backend/internal/model"
 	"langittoba/backend/internal/repository"
+	"langittoba/backend/internal/service"
 	"langittoba/backend/pkg/httpclient"
 )
 
 func main() {
-	// Load .env dari root project (satu level di atas /backend)
 	if err := godotenv.Load("../.env"); err != nil {
 		log.Println("No .env file found, using system environment")
 	}
 
-	// Config
 	inferenceURL := getEnv("INFERENCE_URL", "http://127.0.0.1:8000")
 	port         := getEnv("BACKEND_PORT", "9000")
 
-	// -------------------------------------------------------------------------
-	// Database
-	// -------------------------------------------------------------------------
+	// ── Database ──────────────────────────────────────────────────────────────
 	db, err := initDB()
 	if err != nil {
 		log.Fatalf("✗ Gagal koneksi database: %v", err)
 	}
 	log.Println("✓ Connected to PostgreSQL")
 
-	// Auto-migrate — buat tabel kalau belum ada
-	if err := db.AutoMigrate(&model.Location{}); err != nil {
+	if err := db.AutoMigrate(&model.Location{}, &model.ForecastCache{}); err != nil {
 		log.Fatalf("✗ AutoMigrate gagal: %v", err)
 	}
 
-	// -------------------------------------------------------------------------
-	// Clients & Repositories
-	// -------------------------------------------------------------------------
+	// ── Clients & Repositories ────────────────────────────────────────────────
 	inferenceClient := httpclient.NewInferenceClient(inferenceURL)
 	locationRepo    := repository.NewLocationRepository(db)
+	weatherRepo     := repository.NewWeatherRepository(db)
 
-	// Cek koneksi ke FastAPI
 	if inferenceClient.HealthCheck() {
 		log.Println("✓ Connected to FastAPI inference service")
 	} else {
 		log.Println("⚠ FastAPI inference service not reachable — pastikan sudah running")
 	}
 
-	// -------------------------------------------------------------------------
-	// Handlers
-	// -------------------------------------------------------------------------
-	forecastHandler  := handler.NewForecastHandler(inferenceClient)
-	locationHandler  := handler.NewLocationHandler(locationRepo)
-	warningHandler   := handler.NewWarningHandler(inferenceClient)
-	climateHandler   := handler.NewClimateHandler()
+	// ── Services ──────────────────────────────────────────────────────────────
+	forecastSvc := service.NewForecastService(locationRepo, inferenceClient)
+	climateSvc  := service.NewClimateService(locationRepo, inferenceClient)
+	warningSvc  := service.NewWarningService(locationRepo, inferenceClient)
 
-	// -------------------------------------------------------------------------
-	// Router
-	// -------------------------------------------------------------------------
+	// ── Handlers ──────────────────────────────────────────────────────────────
+	forecastHandler := handler.NewForecastHandler(forecastSvc, weatherRepo)
+	locationHandler := handler.NewLocationHandler(locationRepo)
+	warningHandler  := handler.NewWarningHandler(warningSvc)
+	climateHandler  := handler.NewClimateHandler(climateSvc)
+
+	// ── Router ────────────────────────────────────────────────────────────────
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
@@ -75,26 +70,22 @@ func main() {
 
 	api := r.Group("/api")
 	{
-		// Health
 		api.GET("/health", func(c *gin.Context) {
 			count, _ := locationRepo.CountActive()
 			c.JSON(200, gin.H{
-				"status":          "ok",
-				"service":         "LangitToba Backend",
+				"status":           "ok",
+				"service":          "LangitToba Backend",
 				"active_locations": count,
 			})
 		})
 
-		// Forecast
-		api.GET("/forecast", forecastHandler.GetForecast)
-
-		// Locations — sekarang DB-driven
-		api.GET("/locations",     locationHandler.GetLocations)
-		api.GET("/locations/:key", locationHandler.GetLocationByKey)
-
-		// Warning & Climate
-		api.GET("/warnings", warningHandler.GetWarnings)
-		api.GET("/climate",  climateHandler.GetClimateSummary)
+		api.GET("/forecast",          forecastHandler.GetForecast)
+		api.GET("/locations",         locationHandler.GetLocations)
+		api.GET("/locations/:key",    locationHandler.GetLocationByKey)
+		api.GET("/warnings",          warningHandler.GetWarnings)
+		api.GET("/warnings/:key",     warningHandler.GetWarningByLocation)
+		api.GET("/climate",           climateHandler.GetClimateSummary)
+		api.GET("/climate/all",       climateHandler.GetAllClimate)
 	}
 
 	fmt.Printf("\n🌤  LangitToba Backend running on port %s\n", port)
@@ -106,7 +97,9 @@ func main() {
 	fmt.Println("      GET /api/locations?tahap=1")
 	fmt.Println("      GET /api/locations/:key")
 	fmt.Println("      GET /api/warnings")
-	fmt.Println("      GET /api/climate?location=Balige (Tobasa)")
+	fmt.Println("      GET /api/warnings/:key")
+	fmt.Println("      GET /api/climate?location=balige")
+	fmt.Println("      GET /api/climate/all")
 
 	if err := r.Run(":" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
@@ -116,18 +109,16 @@ func main() {
 func initDB() (*gorm.DB, error) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		// Bangun DSN dari komponen individual
 		host     := getEnv("DB_HOST", "localhost")
 		port     := getEnv("DB_PORT", "5432")
 		dbname   := getEnv("DB_NAME", "langittoba")
 		user     := getEnv("DB_USER", "postgres")
 		password := getEnv("DB_PASSWORD", "")
-		dsn       = fmt.Sprintf(
+		dsn = fmt.Sprintf(
 			"host=%s port=%s dbname=%s user=%s password=%s sslmode=disable TimeZone=Asia/Jakarta",
 			host, port, dbname, user, password,
 		)
 	}
-
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{})
 }
 
