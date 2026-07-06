@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -12,10 +15,12 @@ import (
 	"gorm.io/gorm"
 
 	"langittoba/backend/internal/handler"
+	"langittoba/backend/internal/job"
 	"langittoba/backend/internal/model"
 	"langittoba/backend/internal/repository"
 	"langittoba/backend/internal/service"
 	"langittoba/backend/pkg/httpclient"
+	"langittoba/backend/pkg/scheduler"
 )
 
 func main() {
@@ -26,40 +31,46 @@ func main() {
 	inferenceURL := getEnv("INFERENCE_URL", "http://127.0.0.1:8000")
 	port         := getEnv("BACKEND_PORT", "9000")
 
-	// ── Database ──────────────────────────────────────────────────────────────
+	//  Database 
 	db, err := initDB()
 	if err != nil {
-		log.Fatalf("✗ Gagal koneksi database: %v", err)
+		log.Fatalf(" Gagal koneksi database: %v", err)
 	}
-	log.Println("✓ Connected to PostgreSQL")
+	log.Println(" Connected to PostgreSQL")
 
 	if err := db.AutoMigrate(&model.Location{}, &model.ForecastCache{}); err != nil {
-		log.Fatalf("✗ AutoMigrate gagal: %v", err)
+		log.Fatalf(" AutoMigrate gagal: %v", err)
 	}
 
-	// ── Clients & Repositories ────────────────────────────────────────────────
+	//  Clients & Repositories 
 	inferenceClient := httpclient.NewInferenceClient(inferenceURL)
 	locationRepo    := repository.NewLocationRepository(db)
 	weatherRepo     := repository.NewWeatherRepository(db)
 
 	if inferenceClient.HealthCheck() {
-		log.Println("✓ Connected to FastAPI inference service")
+		log.Println(" Connected to FastAPI inference service")
 	} else {
-		log.Println("⚠ FastAPI inference service not reachable — pastikan sudah running")
+		log.Println(" FastAPI inference service not reachable — pastikan sudah running")
 	}
 
-	// ── Services ──────────────────────────────────────────────────────────────
+	//  Services 
 	forecastSvc := service.NewForecastService(locationRepo, inferenceClient)
 	climateSvc  := service.NewClimateService(locationRepo, inferenceClient)
 	warningSvc  := service.NewWarningService(locationRepo, inferenceClient)
 
-	// ── Handlers ──────────────────────────────────────────────────────────────
+	//  Handlers 
 	forecastHandler := handler.NewForecastHandler(forecastSvc, weatherRepo)
 	locationHandler := handler.NewLocationHandler(locationRepo)
 	warningHandler  := handler.NewWarningHandler(warningSvc)
 	climateHandler  := handler.NewClimateHandler(climateSvc)
 
-	// ── Router ────────────────────────────────────────────────────────────────
+	//  Scheduler 
+	sched      := scheduler.New()
+	refreshJob := job.NewForecastRefreshJob(locationRepo, forecastSvc, weatherRepo)
+	sched.Register("forecast-refresh", 6*time.Hour, refreshJob.Run)
+	sched.Start()
+
+	//  Router 
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
@@ -79,16 +90,16 @@ func main() {
 			})
 		})
 
-		api.GET("/forecast",          forecastHandler.GetForecast)
-		api.GET("/locations",         locationHandler.GetLocations)
-		api.GET("/locations/:key",    locationHandler.GetLocationByKey)
-		api.GET("/warnings",          warningHandler.GetWarnings)
-		api.GET("/warnings/:key",     warningHandler.GetWarningByLocation)
-		api.GET("/climate",           climateHandler.GetClimateSummary)
-		api.GET("/climate/all",       climateHandler.GetAllClimate)
+		api.GET("/forecast",       forecastHandler.GetForecast)
+		api.GET("/locations",      locationHandler.GetLocations)
+		api.GET("/locations/:key", locationHandler.GetLocationByKey)
+		api.GET("/warnings",       warningHandler.GetWarnings)
+		api.GET("/warnings/:key",  warningHandler.GetWarningByLocation)
+		api.GET("/climate",        climateHandler.GetClimateSummary)
+		api.GET("/climate/all",    climateHandler.GetAllClimate)
 	}
 
-	fmt.Printf("\n🌤  LangitToba Backend running on port %s\n", port)
+	fmt.Printf("\n  LangitToba Backend running on port %s\n", port)
 	fmt.Printf("   Inference URL : %s\n", inferenceURL)
 	fmt.Println("   Endpoints     :")
 	fmt.Println("      GET /api/health")
@@ -101,9 +112,19 @@ func main() {
 	fmt.Println("      GET /api/climate?location=balige")
 	fmt.Println("      GET /api/climate/all")
 
-	if err := r.Run(":" + port); err != nil {
-		log.Fatal("Failed to start server:", err)
-	}
+	//  Graceful shutdown 
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		if err := r.Run(":" + port); err != nil {
+			log.Fatal("Failed to start server:", err)
+		}
+	}()
+
+	<-quit
+	log.Println("🛑 Shutting down server...")
+	sched.Stop()
 }
 
 func initDB() (*gorm.DB, error) {

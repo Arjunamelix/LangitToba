@@ -34,8 +34,6 @@ func (s *Scheduler) Register(name string, interval time.Duration, fn func() erro
 	s.jobs = append(s.jobs, Job{Name: name, Interval: interval, Fn: fn})
 }
 
-// Start — jalankan semua job di goroutine masing-masing
-// Panggil setelah semua Register() selesai.
 func (s *Scheduler) Start() {
 	s.mu.Lock()
 	jobs := s.jobs
