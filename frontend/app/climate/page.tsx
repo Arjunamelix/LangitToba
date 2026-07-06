@@ -71,7 +71,7 @@ export default function ClimatePage() {
     setError(null);
     try {
       const locationLabel = LOCATIONS.find((l) => l.key === loc)?.label || loc;
-      const res = await getClimate(locationLabel);
+      const res = await getClimate(loc);
       setData(res);
     } catch {
       setError("Gagal mengambil data iklim. Pastikan backend berjalan.");

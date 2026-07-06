@@ -55,8 +55,8 @@ func main() {
 
 	//  Services 
 	forecastSvc := service.NewForecastService(locationRepo, inferenceClient)
-	climateSvc  := service.NewClimateService(locationRepo, inferenceClient)
-	warningSvc  := service.NewWarningService(locationRepo, inferenceClient)
+	climateSvc  := service.NewClimateService(locationRepo, weatherRepo, inferenceClient)
+	warningSvc  := service.NewWarningService(locationRepo, weatherRepo, inferenceClient)
 
 	//  Handlers 
 	forecastHandler := handler.NewForecastHandler(forecastSvc, weatherRepo)

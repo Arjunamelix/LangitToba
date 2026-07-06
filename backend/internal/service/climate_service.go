@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"langittoba/backend/internal/model"
 	"langittoba/backend/internal/repository"
@@ -26,15 +27,18 @@ type ClimateStats struct {
 
 type ClimateService struct {
 	locationRepo    *repository.LocationRepository
+	weatherRepo     *repository.WeatherRepository
 	inferenceClient *httpclient.InferenceClient
 }
 
 func NewClimateService(
 	locationRepo *repository.LocationRepository,
+	weatherRepo *repository.WeatherRepository,
 	inferenceClient *httpclient.InferenceClient,
 ) *ClimateService {
 	return &ClimateService{
 		locationRepo:    locationRepo,
+		weatherRepo:     weatherRepo,
 		inferenceClient: inferenceClient,
 	}
 }
@@ -51,20 +55,34 @@ func (s *ClimateService) GetClimate(locationKey string) (*ClimateStats, error) {
 	return aggregateClimate(loc, forecast), nil
 }
 
+// GetAllClimate membaca dari forecast_cache DB (cache-first).
+// Hanya skip lokasi yang belum punya cache sama sekali (bukan call FastAPI).
 func (s *ClimateService) GetAllClimate() ([]*ClimateStats, error) {
 	tahap := 1
 	locations, err := s.locationRepo.GetAll(&tahap)
 	if err != nil {
 		return nil, fmt.Errorf("gagal mengambil daftar lokasi: %w", err)
 	}
+
 	results := make([]*ClimateStats, 0, len(locations))
+
 	for _, loc := range locations {
-		forecast, err := s.inferenceClient.Predict(loc.Key, 14)
+		// Coba ambil dari cache DB (14 hari)
+		cache, err := s.weatherRepo.GetCache(loc.Key, 14)
 		if err != nil {
+			// Cache miss atau expired — skip, jangan call FastAPI
 			continue
 		}
-		results = append(results, aggregateClimate(&loc, forecast))
+
+		// Parse JSON dari kolom result
+		var forecastResp model.ForecastResponse
+		if err := json.Unmarshal(cache.Result, &forecastResp); err != nil {
+			continue
+		}
+
+		results = append(results, aggregateClimate(&loc, &forecastResp))
 	}
+
 	return results, nil
 }
 

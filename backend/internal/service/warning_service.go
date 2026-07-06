@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"langittoba/backend/internal/model"
 	"langittoba/backend/internal/repository"
@@ -38,20 +39,23 @@ type LocationWarning struct {
 
 type WarningService struct {
 	locationRepo    *repository.LocationRepository
+	weatherRepo     *repository.WeatherRepository
 	inferenceClient *httpclient.InferenceClient
 }
 
 func NewWarningService(
 	locationRepo *repository.LocationRepository,
+	weatherRepo *repository.WeatherRepository,
 	inferenceClient *httpclient.InferenceClient,
 ) *WarningService {
 	return &WarningService{
 		locationRepo:    locationRepo,
+		weatherRepo:     weatherRepo,
 		inferenceClient: inferenceClient,
 	}
 }
 
-// GetWarnings — evaluasi peringatan untuk semua lokasi aktif
+// GetWarnings — baca dari forecast_cache DB, evaluasi peringatan untuk semua lokasi aktif
 func (s *WarningService) GetWarnings() ([]LocationWarning, error) {
 	tahap := 1
 	locations, err := s.locationRepo.GetAll(&tahap)
@@ -61,17 +65,28 @@ func (s *WarningService) GetWarnings() ([]LocationWarning, error) {
 
 	results := make([]LocationWarning, 0, len(locations))
 	for _, loc := range locations {
-		forecast, err := s.inferenceClient.Predict(loc.Key, 1)
+		// Coba ambil dari cache (7 hari cukup untuk evaluasi hari pertama)
+		cache, err := s.weatherRepo.GetCache(loc.Key, 7)
 		if err != nil {
+			// Fallback ke cache 14 hari kalau 7 hari tidak ada
+			cache, err = s.weatherRepo.GetCache(loc.Key, 14)
+			if err != nil {
+				continue // Skip lokasi yang belum ada cache sama sekali
+			}
+		}
+
+		var forecastResp model.ForecastResponse
+		if err := json.Unmarshal(cache.Result, &forecastResp); err != nil {
 			continue
 		}
-		warning := s.evaluateWarning(&loc, forecast)
+
+		warning := s.evaluateWarning(&loc, &forecastResp)
 		results = append(results, warning)
 	}
 	return results, nil
 }
 
-// GetWarningByLocation — peringatan untuk satu lokasi
+// GetWarningByLocation — peringatan untuk satu lokasi (call FastAPI langsung, single lokasi OK)
 func (s *WarningService) GetWarningByLocation(locationKey string) (*LocationWarning, error) {
 	loc, err := s.locationRepo.GetByKey(locationKey)
 	if err != nil {

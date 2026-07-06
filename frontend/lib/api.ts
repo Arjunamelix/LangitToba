@@ -17,7 +17,24 @@ export async function getLocations(): Promise<Location[]> {
 
 export async function getForecast(location: string, days: number = 7): Promise<ForecastResponse> {
   const res = await api.get("/api/forecast", { params: { location, days } });
-  return res.data;
+
+  // Response structure: { forecast: { forecast: [...], generated_at, ... }, source, expires_at }
+  // Frontend expects ForecastResponse to be the inner object directly
+  const inner: ForecastResponse = res.data.forecast ?? res.data;
+
+  // Normalize warnings field: backend returns "" (string) instead of [] (array)
+  if (inner.forecast) {
+    inner.forecast = inner.forecast.map((day: any) => ({
+      ...day,
+      warnings: Array.isArray(day.warnings)
+        ? day.warnings
+        : day.warnings
+        ? [day.warnings]
+        : [],
+    }));
+  }
+
+  return inner;
 }
 
 export async function getWarnings(): Promise<Warning[]> {
