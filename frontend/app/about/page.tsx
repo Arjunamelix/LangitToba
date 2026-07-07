@@ -16,18 +16,21 @@ const STACK = [
   { layer: "Frontend",          items: ["Next.js 16", "TypeScript", "Tailwind CSS", "shadcn/ui", "Recharts", "Leaflet"],    icon: BookOpen },
 ];
 
-const LOCATIONS = [
-  { label: "Balige (Tobasa)",      lat: "-2.3333", lon: "99.0667" },
-  { label: "Parapat",              lat: "-2.6600", lon: "98.9400" },
-  { label: "Pangururan (Samosir)", lat: "-2.5900", lon: "98.6900" },
-  { label: "Nainggolan",           lat: "-2.6300", lon: "98.8100" },
-  { label: "Tengah Danau Toba",    lat: "-2.6000", lon: "98.8000" },
+const KABUPATEN = [
+  "Toba",
+  "Samosir",
+  "Simalungun",
+  "Tapanuli Utara",
+  "Humbang Hasundutan",
+  "Dairi",
+  "Karo",
 ];
 
 export default function AboutPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8 flex flex-col gap-8">
 
+      {/* Hero */}
       <div className="flex flex-col items-center text-center gap-4 py-6">
         <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center">
           <Cloud className="h-7 w-7 text-primary-foreground" />
@@ -38,7 +41,6 @@ export default function AboutPage() {
         </div>
         <p className="max-w-xl text-sm text-muted-foreground leading-relaxed">
           Platform prediksi dan analisis cuaca kawasan Danau Toba berbasis Machine Learning.
-          Dibangun sebagai proyek portofolio semester break oleh mahasiswa D4 Teknik Informatika Institut Teknologi Del.
         </p>
         <Button asChild variant="outline" className="gap-2">
           <a href="https://github.com/Arjunamelix/LangitToba" target="_blank" rel="noopener noreferrer">
@@ -48,6 +50,7 @@ export default function AboutPage() {
         </Button>
       </div>
 
+      {/* Dataset */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -59,9 +62,9 @@ export default function AboutPage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
               { label: "Total Data",       value: "18.265 baris" },
-              { label: "Periode",          value: "2015 – 2024" },
-              { label: "Titik Lokasi",     value: "5 lokasi" },
-              { label: "Fitur Engineered", value: "40+ fitur" },
+              { label: "Periode",          value: "2015 – 2024"  },
+              { label: "Titik Lokasi",     value: "118 kecamatan" },
+              { label: "Fitur Engineered", value: "40+ fitur"    },
             ].map((s) => (
               <div key={s.label} className="flex flex-col gap-0.5 p-3 rounded-lg bg-muted/50">
                 <p className="text-xs text-muted-foreground">{s.label}</p>
@@ -69,20 +72,26 @@ export default function AboutPage() {
               </div>
             ))}
           </div>
+
+          {/* Cakupan wilayah */}
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">Titik Pemantauan</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {LOCATIONS.map((loc) => (
-                <div key={loc.label} className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 text-xs">
-                  <span className="font-medium">{loc.label}</span>
-                  <span className="text-muted-foreground ml-auto">{loc.lat}°, {loc.lon}°</span>
-                </div>
+            <p className="text-sm font-medium">Cakupan Wilayah — 7 Kabupaten</p>
+            <div className="flex flex-wrap gap-2">
+              {KABUPATEN.map((kab) => (
+                <Badge key={kab} variant="secondary" className="text-xs">
+                  {kab}
+                </Badge>
               ))}
             </div>
+            <p className="text-xs text-muted-foreground">
+              118 kecamatan dipetakan dari data OpenStreetMap Overpass API dan BPS,
+              disimpan dalam database PostgreSQL dengan arsitektur berbasis <em>location key</em>.
+            </p>
           </div>
         </CardContent>
       </Card>
 
+      {/* Model comparison */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -108,7 +117,7 @@ export default function AboutPage() {
                     <td className="py-3 pr-4 font-medium">
                       <span className="flex items-center gap-2">
                         {m.name}
-                        {m.winner && <Badge className="text-xs px-1.5 py-0">🏆 Terbaik</Badge>}
+                        {m.winner && <Badge className="text-xs px-1.5 py-0"> Terbaik</Badge>}
                       </span>
                     </td>
                     <td className={`text-right py-3 px-4 ${m.winner ? "text-primary font-semibold" : ""}`}>{m.mae}</td>
@@ -120,6 +129,7 @@ export default function AboutPage() {
               </tbody>
             </table>
           </div>
+
           <div className="p-4 rounded-lg bg-muted/50">
             <p className="text-sm font-medium mb-2">Arsitektur LSTM</p>
             <pre className="text-xs text-muted-foreground leading-relaxed overflow-x-auto whitespace-pre-wrap">
@@ -140,6 +150,7 @@ Callbacks : EarlyStopping(patience=15)
         </CardContent>
       </Card>
 
+      {/* Tech stack */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -161,9 +172,10 @@ Callbacks : EarlyStopping(patience=15)
         </CardContent>
       </Card>
 
+      {/* Footer */}
       <div className="flex flex-col items-center text-center gap-2 py-4 text-sm text-muted-foreground">
         <p>Dibangun oleh <span className="font-semibold text-foreground">Arjuna Melix Sihombing</span></p>
-        <p>D4 Teknik Informatika · Institut Teknologi Del · 2026</p>
+        <p>D4 TRPL · Institut Teknologi Del · 2026</p>
         <p className="text-xs">Data sumber: Open-Meteo Archive API · NASA POWER · BMKG</p>
       </div>
 

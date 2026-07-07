@@ -2,21 +2,18 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Cloud, MapPin, TrendingUp, AlertTriangle, Map, ArrowRight, Wind, Droplets, Thermometer } from "lucide-react";
+import {
+  Cloud, MapPin, TrendingUp, AlertTriangle, Map,
+  ArrowRight, Thermometer, ChevronDown, ChevronUp,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getHealth, getWarnings } from "@/lib/api";
 import { Warning } from "@/types/weather";
-import { getRiskLabel, getRiskColor } from "@/lib/weatherCode";
+import { useWeatherStore } from "@/store/useWeatherStore";
 
-const LOCATIONS = [
-  { key: "balige",     label: "Balige",    lat: -2.3333, lon: 99.0667 },
-  { key: "parapat",    label: "Parapat",   lat: -2.6600, lon: 98.9400 },
-  { key: "pangururan", label: "Pangururan", lat: -2.5900, lon: 98.6900 },
-  { key: "nainggolan", label: "Nainggolan", lat: -2.6300, lon: 98.8100 },
-  { key: "tengah_danau", label: "Tengah Danau", lat: -2.6000, lon: 98.8000 },
-];
+// ─── Konstanta ──────────────────────────────────────────────────
 
 const FEATURES = [
   {
@@ -46,23 +43,82 @@ const FEATURES = [
   {
     icon: Map,
     title: "Peta Cuaca",
-    desc: "Visualisasi kondisi cuaca 5 titik pemantauan kawasan Danau Toba secara real-time.",
+    desc: "Visualisasi kondisi cuaca 118 titik pemantauan kawasan Danau Toba secara real-time.",
     href: "/map",
     color: "text-violet-500",
     bg: "bg-violet-500/10",
   },
 ];
 
-const STATS = [
-  { label: "Tahun Data",       value: "10",     suffix: " tahun" },
-  { label: "Titik Pemantauan", value: "5",      suffix: " lokasi" },
-  { label: "Akurasi LSTM",     value: "98.3",   suffix: "%" },
-  { label: "Data Historis",    value: "18.265", suffix: " baris" },
+const RISK_BADGE: Record<string, string> = {
+  red:     "bg-red-500 text-white",
+  orange:  "bg-orange-500 text-white",
+  warning: "bg-yellow-400 text-yellow-900",
+};
+
+const RISK_LABEL: Record<string, string> = {
+  red: "BAHAYA", orange: "SIAGA", warning: "WASPADA",
+};
+
+// ─── Kabupaten locations accordion ──────────────────────────────
+
+function KabupatenAccordion({
+  kabupaten,
+  locations,
+}: {
+  kabupaten: string;
+  locations: { key: string; label: string }[];
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="rounded-lg border bg-card overflow-hidden">
+      <button
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-accent/30 transition-colors"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="flex items-center gap-2">
+          <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
+          {kabupaten}
+          <span className="text-xs text-muted-foreground font-normal">
+            ({locations.length} kecamatan)
+          </span>
+        </span>
+        {open ? (
+          <ChevronUp className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        )}
+      </button>
+
+      {open && (
+        <div className="border-t border-border/50 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+          {locations.map((loc) => (
+            <Link
+              key={loc.key}
+              href={`/forecast?location=${loc.key}`}
+              className="text-xs text-muted-foreground hover:text-primary transition-colors truncate"
+            >
+              {loc.label}
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Page ───────────────────────────────────────────────────────
+
+const KAB_ORDER = [
+  "Toba", "Samosir", "Simalungun", "Tapanuli Utara",
+  "Humbang Hasundutan", "Dairi", "Karo",
 ];
 
 export default function HomePage() {
   const [apiStatus, setApiStatus] = useState<"checking" | "online" | "offline">("checking");
-  const [warnings, setWarnings] = useState<Warning[]>([]);
+  const [activeWarnings, setActiveWarnings] = useState<Warning[]>([]);
+  const { locations, fetchLocations } = useWeatherStore();
 
   useEffect(() => {
     getHealth()
@@ -70,36 +126,59 @@ export default function HomePage() {
       .catch(() => setApiStatus("offline"));
 
     getWarnings()
-      .then((data) => setWarnings(data.filter((w) => w.risk_level !== "normal")))
+      .then((data) => setActiveWarnings(data.filter((w) => w.risk_level !== "normal")))
       .catch(() => {});
-  }, []);
+
+    fetchLocations();
+  }, [fetchLocations]);
+
+  // Group locations by kabupaten
+  const kabGroups = locations.reduce<Record<string, { key: string; label: string }[]>>(
+    (acc, loc) => {
+      const kab = loc.kabupaten ?? "Lainnya";
+      if (!acc[kab]) acc[kab] = [];
+      acc[kab].push({ key: loc.key, label: loc.label });
+      return acc;
+    },
+    {}
+  );
+
+  const kabList = [
+    ...KAB_ORDER.filter((k) => kabGroups[k]),
+    ...Object.keys(kabGroups).filter((k) => !KAB_ORDER.includes(k)).sort(),
+  ];
+
+  const STATS = [
+    { label: "Tahun Data",       value: "10",             suffix: " tahun" },
+    { label: "Titik Pemantauan", value: locations.length > 0 ? String(locations.length) : "118", suffix: " lokasi" },
+    { label: "Akurasi LSTM",     value: "98.3",           suffix: "%" },
+    { label: "Data Historis",    value: "18.265",         suffix: " baris" },
+  ];
 
   return (
     <div className="flex flex-col">
 
-      {/*  Hero  */}
+      {/* ── Hero ── */}
       <section className="relative overflow-hidden bg-gradient-to-b from-primary/5 via-background to-background">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 md:py-28">
           <div className="flex flex-col items-center text-center gap-6">
 
-            {/* API Status badge */}
             <Badge
               variant="outline"
-              className={apiStatus === "online"
-                ? "border-green-500/50 text-green-500 bg-green-500/10"
-                : apiStatus === "offline"
-                ? "border-red-500/50 text-red-500 bg-red-500/10"
-                : "border-muted text-muted-foreground"}
+              className={
+                apiStatus === "online"  ? "border-green-500/50 text-green-500 bg-green-500/10" :
+                apiStatus === "offline" ? "border-red-500/50 text-red-500 bg-red-500/10" :
+                "border-muted text-muted-foreground"
+              }
             >
               <span className={`mr-1.5 h-1.5 w-1.5 rounded-full inline-block ${
-                apiStatus === "online" ? "bg-green-500" :
-                apiStatus === "offline" ? "bg-red-500" : "bg-muted-foreground"
+                apiStatus === "online"  ? "bg-green-500" :
+                apiStatus === "offline" ? "bg-red-500"   : "bg-muted-foreground"
               }`} />
-              {apiStatus === "online" ? "Sistem Online" :
-               apiStatus === "offline" ? "Sistem Offline" : "Mengecek sistem..."}
+              {apiStatus === "online"   ? "Sistem Online" :
+               apiStatus === "offline"  ? "Sistem Offline" : "Mengecek sistem..."}
             </Badge>
 
-            {/* Heading */}
             <h1 className="text-4xl md:text-6xl font-bold tracking-tight">
               Baca Cuaca{" "}
               <span className="text-primary">Danau Toba</span>
@@ -112,7 +191,6 @@ export default function HomePage() {
               dan masyarakat umum.
             </p>
 
-            {/* CTA */}
             <div className="flex flex-col sm:flex-row gap-3 mt-2">
               <Button asChild size="lg">
                 <Link href="/forecast">
@@ -125,20 +203,40 @@ export default function HomePage() {
               </Button>
             </div>
 
-            {/* Active warnings */}
-            {warnings.length > 0 && (
-              <div className="w-full max-w-xl mt-2 rounded-lg border border-orange-500/30 bg-orange-500/10 p-3">
-                <p className="text-sm font-medium text-orange-500 flex items-center gap-2">
+            {/* Active warnings — list singkat */}
+            {activeWarnings.length > 0 && (
+              <div className="w-full max-w-xl mt-2 rounded-lg border border-orange-500/30 bg-orange-500/10 p-4 text-left">
+                <p className="text-sm font-semibold text-orange-500 flex items-center gap-2 mb-3">
                   <AlertTriangle className="h-4 w-4" />
-                  {warnings.length} lokasi sedang dalam status peringatan
+                  {activeWarnings.length} lokasi sedang dalam status peringatan
                 </p>
+                <div className="flex flex-col gap-1.5 max-h-36 overflow-y-auto">
+                  {activeWarnings.slice(0, 6).map((w, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs">
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold shrink-0 ${RISK_BADGE[w.risk_level]}`}>
+                        {RISK_LABEL[w.risk_level]}
+                      </span>
+                      <span className="text-orange-800/80 dark:text-orange-200/80 truncate">
+                        {w.location_label}
+                      </span>
+                    </div>
+                  ))}
+                  {activeWarnings.length > 6 && (
+                    <Link
+                      href="/warning"
+                      className="text-xs text-orange-500 hover:underline mt-1"
+                    >
+                      +{activeWarnings.length - 6} lokasi lainnya →
+                    </Link>
+                  )}
+                </div>
               </div>
             )}
           </div>
         </div>
       </section>
 
-      {/*  Stats  */}
+      {/* ── Stats ── */}
       <section className="border-y border-border/50 bg-muted/30">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
@@ -155,7 +253,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/*  Features  */}
+      {/* ── Features ── */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16">
         <div className="flex flex-col items-center text-center gap-3 mb-10">
           <h2 className="text-2xl md:text-3xl font-bold">Fitur Platform</h2>
@@ -185,39 +283,40 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/*  Locations  */}
+      {/* ── Locations — 118 lokasi grouped by kabupaten ── */}
       <section className="bg-muted/30 border-t border-border/50">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16">
           <div className="flex flex-col items-center text-center gap-3 mb-10">
-            <h2 className="text-2xl md:text-3xl font-bold">5 Titik Pemantauan</h2>
+            <h2 className="text-2xl md:text-3xl font-bold">
+              {locations.length > 0 ? `${locations.length} Titik Pemantauan` : "118 Titik Pemantauan"}
+            </h2>
             <p className="text-muted-foreground max-w-xl">
-              Mencakup seluruh kawasan strategis Danau Toba
+              Mencakup 7 kabupaten di kawasan Danau Toba — klik kabupaten untuk lihat daftar kecamatan
             </p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            {LOCATIONS.map((loc) => (
-              <Link key={loc.key} href={`/forecast?location=${loc.key}`}>
-                <Card className="hover:border-primary/50 hover:bg-accent/30 transition-all cursor-pointer group">
-                  <CardContent className="p-4 flex flex-col gap-2">
-                    <div className="flex items-center gap-2">
-                      <MapPin className="h-4 w-4 text-primary shrink-0" />
-                      <span className="font-medium text-sm group-hover:text-primary transition-colors">
-                        {loc.label}
-                      </span>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      <p className="text-xs text-muted-foreground">{loc.lat}°N</p>
-                      <p className="text-xs text-muted-foreground">{loc.lon}°E</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
+
+          {kabList.length === 0 ? (
+            // Skeleton saat loading
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {Array.from({ length: 7 }).map((_, i) => (
+                <div key={i} className="h-12 rounded-lg bg-muted animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {kabList.map((kab) => (
+                <KabupatenAccordion
+                  key={kab}
+                  kabupaten={kab}
+                  locations={kabGroups[kab]}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
-      {/*  Model Info  */}
+      {/* ── Model Info ── */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
           <div className="flex flex-col gap-4">
@@ -243,14 +342,13 @@ export default function HomePage() {
               { model: "Prophet", mae: "0.726", r2: "0.307",  winner: false },
               { model: "LSTM",    mae: "0.490", r2: "0.649",  winner: true  },
             ].map((m) => (
-              <Card
-                key={m.model}
-                className={m.winner ? "border-primary bg-primary/5" : ""}
-              >
+              <Card key={m.model} className={m.winner ? "border-primary bg-primary/5" : ""}>
                 <CardContent className="p-4 flex flex-col gap-2">
                   <div className="flex items-center justify-between">
                     <p className="font-semibold text-sm">{m.model}</p>
-                    {m.winner && <Badge className="text-xs px-1.5 py-0"></Badge>}
+                    {m.winner && (
+                      <Badge className="text-[10px] px-1.5 py-0">Best</Badge>
+                    )}
                   </div>
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-1">
@@ -275,7 +373,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/*  CTA Bottom  */}
+      {/* ── CTA Bottom ── */}
       <section className="border-t border-border/50 bg-primary/5">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16 flex flex-col items-center text-center gap-4">
           <h2 className="text-2xl md:text-3xl font-bold">
@@ -301,3 +399,4 @@ export default function HomePage() {
     </div>
   );
 }
+ 
